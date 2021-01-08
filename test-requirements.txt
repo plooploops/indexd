@@ -1,10 +1,11 @@
 -r requirements.txt
 coveralls
 mock
-pytest==3.0.6
+pytest>=4.6.5,<5.0.0
 pytest-cov==2.5.1
-pytest-flask==0.8.1
+pytest-flask==0.11.0
 PyYAML==5.1
+Werkzeug==0.16.0
 swagger_spec_validator==2.6.0
 responses
 -e git+https://github.com/uc-cdis/cdisutils-test.git@1.0.0#egg=cdisutilstest

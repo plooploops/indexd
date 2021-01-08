@@ -18,6 +18,8 @@ WORKDIR /$appname
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install --upgrade setuptools \
+    && python -m venv py-venv \
+    && . ./py-venv/bin/activate \
     && pip install -r requirements.txt
 
 RUN mkdir -p /var/www/$appname \

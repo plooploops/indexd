@@ -1,0 +1,147 @@
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   labels:
+#     name: gen3
+#   name: gen3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexd-app
+  namespace: gen3
+  labels:
+    aadpodidbinding: my-aks-12345-agentpool
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: indexd-app
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /aggregated_metrics
+        prometheus.io/port: "6567"
+      labels:
+        app: indexd-app
+    spec:
+      nodeSelector:
+        "beta.kubernetes.io/os": linux
+      containers:
+      - name: indexd-app
+        image: myacr12345.azurecr.io/indexd:latest
+        resources:
+          requests:
+            cpu: 0.5
+            memory: 1024Mi
+          limits:
+            cpu: 1.0
+            memory: 2048Mi
+        ports:
+        - name: indexd-port
+          containerPort: 80
+        - name: indexd-ssl-port
+          containerPort: 443
+        - name: prometheus-port
+          containerPort: 6567
+        command: ["/bin/sh","-c"]
+        args: ["while [ ! -f /var/www/indexd/indexd-share/scripts/indexd/indexd_setup.sh ];
+              do sleep 2; 
+              done; 
+              cp indexd-share/Secrets/indexd/indexd_settings.py local_settings.py ;
+              cp indexd-share/Secrets/indexd/indexd_creds.json creds.json ;
+              cp indexd-share/Secrets/indexd/config_helper.py config_helper.py ;
+              cp indexd-share/scripts/indexd/check_db.py check_db.py ;
+              cp indexd-share/scripts/indexd/indexd_setup.sh indexd_setup.sh ;
+              bash /var/www/indexd/indexd_setup.sh"]
+        env:
+        - name: DB_CONNECTION_STRING
+          value: "dbname='fence_db' user='fence_user@mypostgres12345' host='mypostgres12345.postgres.database.azure.com' password='fence_pass' sslmode='require'"
+        - name: METRICS_URL
+          value: "http://localhost:6567/aggregated_metrics"
+        - name: METRICS_CHECK_INTERVAL
+          value: "30"
+        volumeMounts:
+        - name: azure-share-indexd
+          mountPath: /var/www/indexd/indexd-share
+        - name: logs-folder
+          mountPath: "/var/log/nginx"
+        livenessProbe:
+          httpGet:
+            path: /_status
+            port: indexd-port
+          failureThreshold: 3
+          periodSeconds: 60
+          timeoutSeconds: 5
+        startupProbe:
+          httpGet:
+            path: /_status
+            port: indexd-port
+          failureThreshold: 30
+          periodSeconds: 10
+          initialDelaySeconds: 30
+      - name: nginx-prometheus-exporter-wrapper
+        image: quay.io/cdis/nginx-prometheus-exporter-wrapper:pybase3-1.4.0
+        command: ["/bin/bash"]
+        args:
+          - "-c"
+          - |
+            attempt=0
+            maxAttempts=12
+            while true
+            do
+              nginx_status_response=$(curl -L -s -o /dev/null -w "%{http_code}" -X GET http://localhost/nginx_status)
+              echo "initializing nginx-prometheus-exporter..."
+              echo "nginx_status_response: $nginx_status_response"
+              if [ "$nginx_status_response" == 200 ]; then
+                echo "nginx_status is finally up and running. Proceed with the metrics exporting..."
+                /usr/bin/exporter -nginx.scrape-uri http://127.0.0.1/nginx_status
+              else
+                echo "The nginx_status endpoint is not ready yet... attempt #${attempt}"
+                sleep 5
+                if [ $attempt -eq $maxAttempts ];then
+                  echo "The nginx_status endpoint was never initialized properly, keep the sidecar running in sleep mode to prevent the entire pod from failing..."
+                  sleep infinity
+                fi
+              fi
+              attempt=$(( $attempt + 1 ));
+            done
+        ports:
+        - containerPort: 9113
+      - name: uwsgi-exporter
+        image: registry.hub.docker.com/timonwong/uwsgi-exporter:v1.0.0
+        args: ["--stats.uri", "http://127.0.0.1/uwsgi_status"]
+        ports:
+        - containerPort: 9117
+      - name: nginx-logs-exporter
+        image: quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.7.1
+        args: ["/mnt/nginxlogs/access_not_json.log"]
+        ports:
+        - containerPort: 4040
+        volumeMounts:
+        - name: logs-folder
+          mountPath: "/mnt/nginxlogs/"
+      volumes:
+      - name: logs-folder
+        azureFile:
+          secretName: azure-secret
+          shareName: myfileshare12345/logging/indexd
+          readOnly: false
+      - name: azure-share-indexd
+        azureFile:
+          secretName: azure-secret
+          shareName: myfileshare12345
+          readOnly: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: indexd-app
+spec:
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  selector:
+    app: indexd-app

@@ -23,7 +23,6 @@ persistent whereas the path could change if resources are renamed.
 
 import argparse
 import os
-import re
 import sys
 
 from cdislogging import get_logger
@@ -105,7 +104,7 @@ def parse_args():
     parser.add_argument(
         "--tags",
         dest="use_tags",
-        help="Whether to use arborist tags. If set to False, the resource paths will be used",
+        help="Whether to use arborist tags. If set to False, the resource paths will be used",  # noqa: E501
         default=False,
     )
     parser.add_argument(
@@ -154,16 +153,15 @@ class ACLConverter(object):
             )
             for row in result:
                 self.programs.add(row["name"])
-            result = connection.execute(
-                """
-                SELECT
-                    project._props->>'name' AS name,
-                    program._props->>'name' AS program
-                FROM node_project AS project
-                JOIN edge_projectmemberofprogram AS edge ON edge.src_id = project.node_id
-                JOIN node_program AS program ON edge.dst_id = program.node_id;
+            psql_query = """
+            SELECT
+                project._props->>'name' AS name,
+                program._props->>'name' AS program
+            FROM node_project AS project
+            JOIN edge_projectmemberofprogram AS edge ON edge.src_id = project.node_id
+            JOIN node_program AS program ON edge.dst_id = program.node_id;
             """
-            )
+            result = connection.execute(psql_query)
             for row in result:
                 self.projects[row["name"]] = row["program"]
             connection.close()
@@ -259,7 +257,7 @@ class ACLConverter(object):
                     tag = response.json()["exists"]["tag"]
                 elif response.status_code != 201:
                     logger.error(
-                        "couldn't hit arborist at {} to create resource (got {}): {}".format(
+                        "couldn't hit arborist at {} to create resource (got {}): {}".format(  # noqa: E501
                             url, response.status_code, response.json()
                         )
                     )
